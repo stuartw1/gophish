@@ -26,6 +26,15 @@ type PhishServer struct {
 	KeyPath   string `json:"key_path"`
 }
 
+// AmsMaritime holds the configuration for the ams-maritime Cloudflare Worker
+// integration. GoPhish pushes the UUID lookup table to the Worker after each
+// campaign is created so that the Worker can validate recipients without a
+// manual deploy.
+type AmsMaritime struct {
+	URL     string `json:"url"`
+	SyncKey string `json:"sync_key"`
+}
+
 // Config represents the configuration information.
 type Config struct {
 	AdminConf      AdminServer `json:"admin_server"`
@@ -37,6 +46,7 @@ type Config struct {
 	TestFlag       bool        `json:"test_flag"`
 	ContactAddress string      `json:"contact_address"`
 	Logging        *log.Config `json:"logging"`
+	AmsMaritime    AmsMaritime `json:"ams_maritime"`
 }
 
 // Version contains the current gophish version

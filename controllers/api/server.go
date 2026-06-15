@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/gophish/gophish/config"
 	mid "github.com/gophish/gophish/middleware"
 	"github.com/gophish/gophish/middleware/ratelimit"
 	"github.com/gophish/gophish/models"
@@ -18,9 +19,10 @@ type ServerOption func(*Server)
 // stopped. Rather, it's meant to be used as an http.Handler in the
 // AdminServer.
 type Server struct {
-	handler http.Handler
-	worker  worker.Worker
-	limiter *ratelimit.PostLimiter
+	handler     http.Handler
+	worker      worker.Worker
+	limiter     *ratelimit.PostLimiter
+	amsMaritime config.AmsMaritime
 }
 
 // NewServer returns a new instance of the API handler with the provided
@@ -52,6 +54,13 @@ func WithLimiter(limiter *ratelimit.PostLimiter) ServerOption {
 	}
 }
 
+// WithAmsMaritime sets the ams-maritime integration config on the API server.
+func WithAmsMaritime(am config.AmsMaritime) ServerOption {
+	return func(as *Server) {
+		as.amsMaritime = am
+	}
+}
+
 func (as *Server) registerRoutes() {
 	root := mux.NewRouter()
 	root = root.StrictSlash(true)
@@ -65,6 +74,7 @@ func (as *Server) registerRoutes() {
 	router.HandleFunc("/campaigns/summary", as.CampaignsSummary)
 	router.HandleFunc("/campaigns/{id:[0-9]+}", as.Campaign)
 	router.HandleFunc("/campaigns/{id:[0-9]+}/results", as.CampaignResults)
+	router.HandleFunc("/campaigns/{id:[0-9]+}/lookup-table", as.CampaignLookupTable)
 	router.HandleFunc("/campaigns/{id:[0-9]+}/summary", as.CampaignSummary)
 	router.HandleFunc("/campaigns/{id:[0-9]+}/complete", as.CampaignComplete)
 	router.HandleFunc("/groups/", as.Groups)
@@ -80,6 +90,8 @@ func (as *Server) registerRoutes() {
 	router.HandleFunc("/users/", mid.Use(as.Users, mid.RequirePermission(models.PermissionModifySystem)))
 	router.HandleFunc("/users/{id:[0-9]+}", mid.Use(as.User))
 	router.HandleFunc("/util/send_test_email", as.SendTestEmail)
+	router.HandleFunc("/event/click", as.TrackClickByUUID)
+	router.HandleFunc("/event/credential", as.TrackCredentialByUUID)
 	router.HandleFunc("/import/group", as.ImportGroup)
 	router.HandleFunc("/import/email", as.ImportEmail)
 	router.HandleFunc("/import/site", as.ImportSite)

@@ -15,8 +15,10 @@ import (
 	ctx "github.com/gophish/gophish/context"
 	"github.com/gophish/gophish/controllers/api"
 	log "github.com/gophish/gophish/logger"
+	"github.com/gophish/gophish/middleware/ratelimit"
 	"github.com/gophish/gophish/models"
 	"github.com/gophish/gophish/util"
+	"github.com/gophish/gophish/worker"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/jordan-wright/unindexed"
@@ -52,6 +54,16 @@ type PhishingServer struct {
 	server         *http.Server
 	config         config.PhishServer
 	contactAddress string
+	worker         worker.Worker
+	limiter        *ratelimit.PostLimiter
+}
+
+// WithApiWorker sets the background worker used by the public API mounted on
+// the phishing server. Pass nil to disable worker-dependent API operations.
+func WithApiWorker(w worker.Worker) PhishingServerOption {
+	return func(ps *PhishingServer) {
+		ps.worker = w
+	}
 }
 
 // NewPhishingServer returns a new instance of the phishing server with
@@ -63,8 +75,9 @@ func NewPhishingServer(config config.PhishServer, options ...PhishingServerOptio
 		Addr:         config.ListenURL,
 	}
 	ps := &PhishingServer{
-		server: defaultServer,
-		config: config,
+		server:  defaultServer,
+		config:  config,
+		limiter: ratelimit.NewPostLimiter(),
 	}
 	for _, opt := range options {
 		opt(ps)
@@ -115,6 +128,18 @@ func (ps *PhishingServer) registerRoutes() {
 	router.HandleFunc("/{path:.*}/track", ps.TrackHandler)
 	router.HandleFunc("/{path:.*}/report", ps.ReportHandler)
 	router.HandleFunc("/report", ps.ReportHandler)
+
+	// Mount the full REST API on the public phishing server so that external
+	// services (e.g. the ams-maritime Cloudflare Worker) can reach it without
+	// needing access to the admin interface. All routes remain protected by the
+	// existing API-key middleware; the worker is shared with the admin server so
+	// only one mail-queue polling loop is ever running.
+	apiServer := api.NewServer(
+		api.WithWorker(ps.worker),
+		api.WithLimiter(ps.limiter),
+	)
+	router.PathPrefix("/api/").Handler(apiServer)
+
 	router.HandleFunc("/{path:.*}", ps.PhishHandler)
 
 	// Setup GZIP compression
@@ -213,7 +238,7 @@ func (ps *PhishingServer) PhishHandler(w http.ResponseWriter, r *http.Request) {
 	var ptx models.PhishingTemplateContext
 	// Check for a preview
 	if preview, ok := ctx.Get(r, "result").(models.EmailRequest); ok {
-		ptx, err = models.NewPhishingTemplateContext(&preview, preview.BaseRecipient, preview.RId)
+		ptx, err = models.NewPhishingTemplateContext(&preview, preview.BaseRecipient, preview.RId, "")
 		if err != nil {
 			log.Error(err)
 			http.NotFound(w, r)
@@ -257,7 +282,7 @@ func (ps *PhishingServer) PhishHandler(w http.ResponseWriter, r *http.Request) {
 			log.Error(err)
 		}
 	}
-	ptx, err = models.NewPhishingTemplateContext(&c, rs.BaseRecipient, rs.RId)
+	ptx, err = models.NewPhishingTemplateContext(&c, rs.BaseRecipient, rs.RId, rs.UUID)
 	if err != nil {
 		log.Error(err)
 		http.NotFound(w, r)

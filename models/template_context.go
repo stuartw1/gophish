@@ -23,13 +23,16 @@ type PhishingTemplateContext struct {
 	Tracker     string
 	TrackingURL string
 	RId         string
+	UUID        string
 	BaseURL     string
 	BaseRecipient
 }
 
 // NewPhishingTemplateContext returns a populated PhishingTemplateContext,
 // parsing the correct fields from the provided TemplateContext and recipient.
-func NewPhishingTemplateContext(ctx TemplateContext, r BaseRecipient, rid string) (PhishingTemplateContext, error) {
+// uuid is the UUID v4 assigned to this result for use in external share links
+// (e.g. {{.UUID}} in email templates); pass an empty string for previews.
+func NewPhishingTemplateContext(ctx TemplateContext, r BaseRecipient, rid string, uuid string) (PhishingTemplateContext, error) {
 	f, err := mail.ParseAddress(ctx.getFromAddress())
 	if err != nil {
 		return PhishingTemplateContext{}, err
@@ -69,6 +72,7 @@ func NewPhishingTemplateContext(ctx TemplateContext, r BaseRecipient, rid string
 		Tracker:       "<img alt='' style='display: none' src='" + trackingURL.String() + "'/>",
 		From:          fn,
 		RId:           rid,
+		UUID:          uuid,
 	}, nil
 }
 
@@ -114,7 +118,7 @@ func ValidateTemplate(text string) error {
 		},
 		RId: "123456",
 	}
-	ptx, err := NewPhishingTemplateContext(vc, td.BaseRecipient, td.RId)
+	ptx, err := NewPhishingTemplateContext(vc, td.BaseRecipient, td.RId, "")
 	if err != nil {
 		return err
 	}

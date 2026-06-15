@@ -35,10 +35,11 @@ type AdminServerOption func(*AdminServer)
 // AdminServer is an HTTP server that implements the administrative Gophish
 // handlers, including the dashboard and REST API.
 type AdminServer struct {
-	server  *http.Server
-	worker  worker.Worker
-	config  config.AdminServer
-	limiter *ratelimit.PostLimiter
+	server      *http.Server
+	worker      worker.Worker
+	config      config.AdminServer
+	limiter     *ratelimit.PostLimiter
+	amsMaritime config.AmsMaritime
 }
 
 var defaultTLSConfig = &tls.Config{
@@ -66,6 +67,13 @@ var defaultTLSConfig = &tls.Config{
 func WithWorker(w worker.Worker) AdminServerOption {
 	return func(as *AdminServer) {
 		as.worker = w
+	}
+}
+
+// WithAmsMaritime sets the ams-maritime integration config on the admin server.
+func WithAmsMaritime(am config.AmsMaritime) AdminServerOption {
+	return func(as *AdminServer) {
+		as.amsMaritime = am
 	}
 }
 
@@ -141,8 +149,14 @@ func (as *AdminServer) registerRoutes() {
 	api := api.NewServer(
 		api.WithWorker(as.worker),
 		api.WithLimiter(as.limiter),
+		api.WithAmsMaritime(as.amsMaritime),
 	)
 	router.PathPrefix("/api/").Handler(api)
+
+	// Email open-tracking pixel — same path as the phishing server so that
+	// campaigns with URL = https://p.43.tf:3333 generate working tracker URLs
+	// even when the phishing server is not running.
+	router.HandleFunc("/track", TrackEmailOpen)
 
 	// Setup static file serving
 	router.PathPrefix("/").Handler(http.FileServer(unindexed.Dir("./static/")))

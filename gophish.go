@@ -42,6 +42,7 @@ import (
 	"github.com/gophish/gophish/middleware"
 	"github.com/gophish/gophish/models"
 	"github.com/gophish/gophish/webhook"
+	"github.com/gophish/gophish/worker"
 )
 
 const (
@@ -54,7 +55,7 @@ var (
 	configPath    = kingpin.Flag("config", "Location of config.json.").Default("./config.json").String()
 	disableMailer = kingpin.Flag("disable-mailer", "Disable the mailer (for use with multi-system deployments)").Bool()
 	mode          = kingpin.Flag("mode", fmt.Sprintf("Run the binary in one of the modes (%s, %s or %s)", modeAll, modeAdmin, modePhish)).
-			Default("all").Enum(modeAll, modeAdmin, modePhish)
+			Default("admin").Enum(modeAll, modeAdmin, modePhish)
 )
 
 func main() {
@@ -108,17 +109,24 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Create our servers
-	adminOptions := []controllers.AdminServerOption{}
-	if *disableMailer {
-		adminOptions = append(adminOptions, controllers.WithWorker(nil))
+	// Create the background worker once so it is shared between the admin
+	// server (which starts the mail-queue polling loop) and the phishing server
+	// (which exposes the public API). A single shared worker ensures only one
+	// polling loop ever runs regardless of which server handles an API request.
+	var w worker.Worker
+	if !*disableMailer {
+		w, err = worker.New()
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
+
 	adminConfig := conf.AdminConf
-	adminServer := controllers.NewAdminServer(adminConfig, adminOptions...)
+	adminServer := controllers.NewAdminServer(adminConfig, controllers.WithWorker(w), controllers.WithAmsMaritime(conf.AmsMaritime))
 	middleware.Store.Options.Secure = adminConfig.UseTLS
 
 	phishConfig := conf.PhishConf
-	phishServer := controllers.NewPhishingServer(phishConfig)
+	phishServer := controllers.NewPhishingServer(phishConfig, controllers.WithApiWorker(w))
 
 	imapMonitor := imap.NewMonitor()
 	if *mode == "admin" || *mode == "all" {

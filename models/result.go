@@ -3,6 +3,7 @@ package models
 import (
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net"
 	"time"
@@ -28,6 +29,7 @@ type Result struct {
 	CampaignId   int64     `json:"-"`
 	UserId       int64     `json:"-"`
 	RId          string    `json:"id"`
+	UUID         string    `json:"uuid" sql:"not null"`
 	Status       string    `json:"status" sql:"not null"`
 	IP           string    `json:"ip"`
 	Latitude     float64   `json:"latitude"`
@@ -183,8 +185,19 @@ func generateResultId() (string, error) {
 	return string(k), nil
 }
 
+// generateUUID returns a random UUID v4 string using crypto/rand.
+func generateUUID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
 // GenerateId generates a unique key to represent the result
-// in the database
+// in the database, and a UUID v4 for use in external share links.
 func (r *Result) GenerateId(tx *gorm.DB) error {
 	// Keep trying until we generate a unique key (shouldn't take more than one or two iterations)
 	for {
@@ -192,7 +205,12 @@ func (r *Result) GenerateId(tx *gorm.DB) error {
 		if err != nil {
 			return err
 		}
+		uuid, err := generateUUID()
+		if err != nil {
+			return err
+		}
 		r.RId = rid
+		r.UUID = uuid
 		err = tx.Table("results").Where("r_id=?", r.RId).First(&Result{}).Error
 		if err == gorm.ErrRecordNotFound {
 			break
@@ -206,5 +224,13 @@ func (r *Result) GenerateId(tx *gorm.DB) error {
 func GetResult(rid string) (Result, error) {
 	r := Result{}
 	err := db.Where("r_id=?", rid).First(&r).Error
+	return r, err
+}
+
+// GetResultByUUID returns the Result object from the database
+// given the UUID generated for external share links.
+func GetResultByUUID(uuid string) (Result, error) {
+	r := Result{}
+	err := db.Where("uuid=?", uuid).First(&r).Error
 	return r, err
 }
